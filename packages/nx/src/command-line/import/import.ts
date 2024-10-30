@@ -2,7 +2,6 @@ import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { minimatch } from 'minimatch';
 import { existsSync, promises as fsp } from 'node:fs';
 import * as chalk from 'chalk';
-import { load as yamlLoad } from '@zkochan/js-yaml';
 import { cloneFromUpstream, GitRepository } from '../../utils/git-utils';
 import { stat, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'tmp';
@@ -13,8 +12,10 @@ import { detectPlugins, installPlugins } from '../init/init-v2';
 import { readNxJson } from '../../config/nx-json';
 import { workspaceRoot } from '../../utils/workspace-root';
 import {
+  addPackagePathToWorkspaces,
   detectPackageManager,
   getPackageManagerCommand,
+  getPackageWorkspaces,
   isWorkspacesEnabled,
   PackageManager,
   PackageManagerCommands,
@@ -28,7 +29,6 @@ import {
   getPackagesInPackageManagerWorkspace,
   needsInstall,
 } from './utils/needs-install';
-import { readPackageJson } from '../../project-graph/file-utils';
 
 const importRemoteName = '__tmp_nx_import__';
 
@@ -193,8 +193,17 @@ export async function importHandler(options: ImportOptions) {
   }
 
   const absDestination = join(process.cwd(), destination);
+  const relativeDestination = relative(
+    destinationGitClient.root,
+    absDestination
+  );
+
+  const packageManager = detectPackageManager(workspaceRoot);
+  const pmc = getPackageManagerCommand();
 
   await assertDestinationEmpty(destinationGitClient, absDestination);
+
+  await handleMissingWorkspacesEntry(packageManager, pmc, relativeDestination);
 
   const tempImportBranch = getTempImportBranch(ref);
   await sourceGitClient.addFetchRemote(importRemoteName, ref);
@@ -218,18 +227,12 @@ export async function importHandler(options: ImportOptions) {
     );
   }
 
-  const packageManager = detectPackageManager(workspaceRoot);
-
   const originalPackageWorkspaces = await getPackagesInPackageManagerWorkspace(
     packageManager
   );
 
   const sourceIsNxWorkspace = existsSync(join(sourceGitClient.root, 'nx.json'));
 
-  const relativeDestination = relative(
-    destinationGitClient.root,
-    absDestination
-  );
   await prepareSourceRepo(
     sourceGitClient,
     ref,
@@ -259,7 +262,6 @@ export async function importHandler(options: ImportOptions) {
   await destinationGitClient.deleteGitRemote(importRemoteName);
   spinner.succeed('Cleaned up temporary files and remotes');
 
-  const pmc = getPackageManagerCommand();
   const nxJson = readNxJson(workspaceRoot);
 
   resetWorkspaceContext();
@@ -325,8 +327,6 @@ export async function importHandler(options: ImportOptions) {
     });
   }
 
-  await warnOnMissingWorkspacesEntry(packageManager, pmc, relativeDestination);
-
   if (source != destination) {
     output.warn({
       title: `Check configuration files`,
@@ -391,9 +391,10 @@ async function createTemporaryRemote(
   await destinationGitClient.fetch(remoteName);
 }
 
-// If the user imports a project that isn't in NPM/Yarn/PNPM workspaces, then its dependencies
-// will not be installed. We should warn users and provide instructions on how to fix this.
-async function warnOnMissingWorkspacesEntry(
+/**
+ * If the user imports a project that isn't in the workspaces entry, we should add that path to the workspaces entry.
+ */
+async function handleMissingWorkspacesEntry(
   pm: PackageManager,
   pmc: PackageManagerCommands,
   pkgPath: string
@@ -427,21 +428,10 @@ async function warnOnMissingWorkspacesEntry(
               `See: https://pnpm.io/workspaces`,
             ],
     });
+    addPackagePathToWorkspaces(pm, workspaceRoot, pkgPath);
   } else {
     // Check if the new package is included in existing workspaces entries. If not, warn the user.
-    let workspaces: string[] | null = null;
-
-    if (pm === 'npm' || pm === 'yarn' || pm === 'bun') {
-      const packageJson = readPackageJson();
-      workspaces = packageJson.workspaces;
-    } else if (pm === 'pnpm') {
-      const yamlPath = join(workspaceRoot, 'pnpm-workspace.yaml');
-      if (existsSync(yamlPath)) {
-        const yamlContent = await fsp.readFile(yamlPath, 'utf-8');
-        const yaml = yamlLoad(yamlContent);
-        workspaces = yaml.packages;
-      }
-    }
+    let workspaces: string[] | null = getPackageWorkspaces(pm, workspaceRoot);
 
     if (workspaces) {
       const isPkgIncluded = workspaces.some((w) => minimatch(pkgPath, w));
@@ -461,6 +451,7 @@ async function warnOnMissingWorkspacesEntry(
                 ],
         });
       }
+      addPackagePathToWorkspaces(pm, workspaceRoot, pkgPath);
     }
   }
 }

@@ -1,10 +1,12 @@
 import { exec, execSync } from 'child_process';
-import { copyFileSync, existsSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, relative } from 'path';
 import { gte, lt } from 'semver';
 import { dirSync } from 'tmp';
 import { promisify } from 'util';
+import { load as yamlLoad, dump as yamlDump } from '@zkochan/js-yaml';
+
 import { readNxJson } from '../config/configuration';
 import { readPackageJson } from '../project-graph/file-utils';
 import { readFileIfExisting, readJsonFile, writeJsonFile } from './fileutils';
@@ -477,4 +479,74 @@ export async function packageRegistryPack(
 
   const tarballPath = stdout.trim();
   return { tarballPath };
+}
+
+/**
+ * This function returns the workspaces defined in the package manager configuration.
+ * @returns workspaces defined in the package manager configuration, null if not found
+ */
+export function getPackageWorkspaces(
+  packageManager: PackageManager = detectPackageManager(),
+  root: string = workspaceRoot
+): string[] | null {
+  let workspaces: string[] | null = null;
+
+  if (
+    packageManager === 'npm' ||
+    packageManager === 'yarn' ||
+    packageManager === 'bun'
+  ) {
+    const packageJson = readPackageJson();
+    workspaces = packageJson.workspaces;
+  } else if (packageManager === 'pnpm') {
+    const yamlPath = join(root, 'pnpm-workspace.yaml');
+    if (existsSync(yamlPath)) {
+      const yamlContent = readFileSync(yamlPath, 'utf-8');
+
+      const yaml = yamlLoad(yamlContent);
+      workspaces = yaml.packages;
+    }
+  }
+
+  return workspaces;
+}
+
+/**
+ * This function adds a package to the workspaces defined in the package manager configuration.
+ * If the package is already in the workspaces, it will not be added again.
+ * If the package manager is not supported, this function will do nothing.
+ */
+export function addPackagePathToWorkspaces(
+  packageManager: PackageManager = detectPackageManager(),
+  root: string = workspaceRoot,
+  packagePath: string
+): void {
+  let workspaces: string[] = getPackageWorkspaces(packageManager, root) ?? [];
+  if (!workspaces.includes(packagePath)) {
+    workspaces.push(join(packagePath, '*'));
+  }
+  packagePath;
+
+  if (
+    packageManager === 'npm' ||
+    packageManager === 'yarn' ||
+    packageManager === 'bun'
+  ) {
+    const packageJson = readPackageJson();
+    const updatedPackageJson = {
+      ...packageJson,
+      workspaces,
+    };
+    const packageJsonPath = join(root, 'package.json');
+    writeJsonFile(packageJsonPath, updatedPackageJson);
+  } else if (packageManager === 'pnpm') {
+    const yamlPath = join(root, 'pnpm-workspace.yaml');
+    let yaml: any = {};
+    if (existsSync(yamlPath)) {
+      const yamlContent = readFileSync(yamlPath, 'utf-8');
+      yaml = yamlLoad(yamlContent);
+    }
+    yaml.packages = workspaces;
+    writeFileSync(yamlPath, yamlDump(yaml));
+  }
 }

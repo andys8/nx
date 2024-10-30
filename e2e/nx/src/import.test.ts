@@ -5,9 +5,9 @@ import {
   newProject,
   runCLI,
   runCommand,
-  updateJson,
-  updateFile,
   e2eCwd,
+  readJson,
+  readFile,
 } from '@nx/e2e/utils';
 import { writeFileSync, mkdirSync, rmdirSync } from 'fs';
 import { execSync } from 'node:child_process';
@@ -20,20 +20,6 @@ describe('Nx Import', () => {
     proj = newProject({
       packages: ['@nx/js'],
     });
-
-    if (getSelectedPackageManager() === 'pnpm') {
-      updateFile(
-        'pnpm-workspace.yaml',
-        `packages:
-  - 'projects/*'
-`
-      );
-    } else {
-      updateJson('package.json', (json) => {
-        json.workspaces = ['projects/*'];
-        return json;
-      });
-    }
 
     try {
       rmdirSync(join(tempImportE2ERoot));
@@ -84,6 +70,14 @@ describe('Nx Import', () => {
         verbose: true,
       }
     );
+
+    if (getSelectedPackageManager() === 'pnpm') {
+      const workspaceYaml = readFile('pnpm-workspace.yaml');
+      expect(workspaceYaml).toContain(['projects/*']);
+    } else {
+      const packageJson = readJson('package.json');
+      expect(packageJson.workspaces).toEqual(['projects/*']);
+    }
 
     checkFilesExist(
       'projects/vite-app/.gitignore',
