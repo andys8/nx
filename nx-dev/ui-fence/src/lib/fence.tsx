@@ -4,6 +4,7 @@ import {
   ClipboardDocumentIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { Selector } from '@nx/nx-dev/ui-common';
 import cx from 'classnames';
 import { JSX, ReactNode, useEffect, useState } from 'react';
 // @ts-ignore
@@ -12,8 +13,6 @@ import { CopyToClipboard } from 'react-copy-to-clipboard';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { CodeOutput } from './fences/code-output';
 import { TerminalOutput } from './fences/terminal-output';
-
-import { Selector } from './selector';
 
 function resolveLanguage(lang: string) {
   switch (lang) {
