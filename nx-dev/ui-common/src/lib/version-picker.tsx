@@ -1,5 +1,6 @@
+'use client';
 import { Selector } from './selector';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 
 const versionOptions = [
   {
